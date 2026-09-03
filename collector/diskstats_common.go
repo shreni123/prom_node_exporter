@@ -34,7 +34,7 @@ var (
 	diskstatsDeviceExclude    = kingpin.Flag(
 		"collector.diskstats.device-exclude",
 		"Regexp of diskstats devices to exclude (mutually exclusive to device-include).",
-	).Default(diskstatsDefaultIgnoredDevices).PreAction(func(c *kingpin.ParseContext) error {
+	).Default(diskstatsDefaultIgnoredDevices).PreAction(func(_ *kingpin.ParseContext) error {
 		diskstatsDeviceExcludeSet = true
 		return nil
 	}).String()
@@ -99,9 +99,11 @@ func newDiskstatsDeviceFilter(logger *slog.Logger) (deviceFilter, error) {
 			return deviceFilter{}, errors.New("--collector.diskstats.ignored-devices and --collector.diskstats.device-exclude are mutually exclusive")
 		}
 	}
-
-	if *diskstatsDeviceExclude != "" && *diskstatsDeviceInclude != "" {
-		return deviceFilter{}, errors.New("device-exclude & device-include are mutually exclusive")
+	if *diskstatsDeviceInclude != "" {
+		if diskstatsDeviceExcludeSet && *diskstatsDeviceExclude != "" {
+			return deviceFilter{}, errors.New("device-exclude & device-include are mutually exclusive")
+		}
+		*diskstatsDeviceExclude = ""
 	}
 
 	if *diskstatsDeviceExclude != "" {

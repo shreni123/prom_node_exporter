@@ -28,21 +28,56 @@ const (
 )
 
 type drmCollector struct {
-	fs                    sysfs.FS
-	logger                *slog.Logger
-	CardInfo              *prometheus.Desc
-	GPUBusyPercent        *prometheus.Desc
-	MemoryGTTSize         *prometheus.Desc
-	MemoryGTTUsed         *prometheus.Desc
-	MemoryVisibleVRAMSize *prometheus.Desc
-	MemoryVisibleVRAMUsed *prometheus.Desc
-	MemoryVRAMSize        *prometheus.Desc
-	MemoryVRAMUsed        *prometheus.Desc
+	fs     sysfs.FS
+	logger *slog.Logger
 }
 
 func init() {
 	registerCollector("drm", defaultDisabled, NewDrmCollector)
 }
+
+var (
+	drmCardInfo = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "card_info"),
+		"Card information",
+		[]string{"card", "memory_vendor", "power_performance_level", "unique_id", "chip", "vendor"}, nil,
+	)
+	drmGPUBusyPercent = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "gpu_busy_percent"),
+		"How busy the GPU is as a percentage.",
+		[]string{"card"}, nil,
+	)
+	drmMemoryGTTSize = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_gtt_size_bytes"),
+		"The size of the graphics translation table (GTT) block in bytes.",
+		[]string{"card"}, nil,
+	)
+	drmMemoryGTTUsed = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_gtt_used_bytes"),
+		"The used amount of the graphics translation table (GTT) block in bytes.",
+		[]string{"card"}, nil,
+	)
+	drmMemoryVisibleVRAMSize = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vis_vram_size_bytes"),
+		"The size of visible VRAM in bytes.",
+		[]string{"card"}, nil,
+	)
+	drmMemoryVisibleVRAMUsed = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vis_vram_used_bytes"),
+		"The used amount of visible VRAM in bytes.",
+		[]string{"card"}, nil,
+	)
+	drmMemoryVRAMSize = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vram_size_bytes"),
+		"The size of VRAM in bytes.",
+		[]string{"card"}, nil,
+	)
+	drmMemoryVRAMUsed = prometheus.NewDesc(
+		prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vram_used_bytes"),
+		"The used amount of VRAM in bytes.",
+		[]string{"card"}, nil,
+	)
+)
 
 // NewDrmCollector returns a new Collector exposing /sys/class/drm/card?/device stats.
 func NewDrmCollector(logger *slog.Logger) (Collector, error) {
@@ -54,51 +89,22 @@ func NewDrmCollector(logger *slog.Logger) (Collector, error) {
 	return &drmCollector{
 		fs:     fs,
 		logger: logger,
-		CardInfo: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "card_info"),
-			"Card information",
-			[]string{"card", "memory_vendor", "power_performance_level", "unique_id", "vendor"}, nil,
-		),
-		GPUBusyPercent: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "gpu_busy_percent"),
-			"How busy the GPU is as a percentage.",
-			[]string{"card"}, nil,
-		),
-		MemoryGTTSize: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_gtt_size_bytes"),
-			"The size of the graphics translation table (GTT) block in bytes.",
-			[]string{"card"}, nil,
-		),
-		MemoryGTTUsed: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_gtt_used_bytes"),
-			"The used amount of the graphics translation table (GTT) block in bytes.",
-			[]string{"card"}, nil,
-		),
-		MemoryVisibleVRAMSize: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vis_vram_size_bytes"),
-			"The size of visible VRAM in bytes.",
-			[]string{"card"}, nil,
-		),
-		MemoryVisibleVRAMUsed: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vis_vram_used_bytes"),
-			"The used amount of visible VRAM in bytes.",
-			[]string{"card"}, nil,
-		),
-		MemoryVRAMSize: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vram_size_bytes"),
-			"The size of VRAM in bytes.",
-			[]string{"card"}, nil,
-		),
-		MemoryVRAMUsed: prometheus.NewDesc(
-			prometheus.BuildFQName(namespace, drmCollectorSubsystem, "memory_vram_used_bytes"),
-			"The used amount of VRAM in bytes.",
-			[]string{"card"}, nil,
-		),
 	}, nil
 }
 
 func (c *drmCollector) Update(ch chan<- prometheus.Metric) error {
 	return c.updateAMDCards(ch)
+}
+
+func chipName(s sysfs.ClassDRMCardAMDGPUStats) string {
+	// generate a chip name based on the deviceType and devName
+	cleanDevName := cleanMetricName(s.DevName)
+	cleanDevType := cleanMetricName(s.DevType)
+
+	if cleanDevType != "" && cleanDevName != "" {
+		return cleanDevType + "_" + cleanDevName
+	}
+	return cleanDevName
 }
 
 func (c *drmCollector) updateAMDCards(ch chan<- prometheus.Metric) error {
@@ -110,29 +116,29 @@ func (c *drmCollector) updateAMDCards(ch chan<- prometheus.Metric) error {
 
 	for _, s := range stats {
 		ch <- prometheus.MustNewConstMetric(
-			c.CardInfo, prometheus.GaugeValue, 1,
-			s.Name, s.MemoryVRAMVendor, s.PowerDPMForcePerformanceLevel, s.UniqueID, vendor)
+			drmCardInfo, prometheus.GaugeValue, 1,
+			s.Name, s.MemoryVRAMVendor, s.PowerDPMForcePerformanceLevel, s.UniqueID, chipName(s), vendor)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.GPUBusyPercent, prometheus.GaugeValue, float64(s.GPUBusyPercent), s.Name)
+			drmGPUBusyPercent, prometheus.GaugeValue, float64(s.GPUBusyPercent), s.Name)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.MemoryGTTSize, prometheus.GaugeValue, float64(s.MemoryGTTSize), s.Name)
+			drmMemoryGTTSize, prometheus.GaugeValue, float64(s.MemoryGTTSize), s.Name)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.MemoryGTTUsed, prometheus.GaugeValue, float64(s.MemoryGTTUsed), s.Name)
+			drmMemoryGTTUsed, prometheus.GaugeValue, float64(s.MemoryGTTUsed), s.Name)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.MemoryVRAMSize, prometheus.GaugeValue, float64(s.MemoryVRAMSize), s.Name)
+			drmMemoryVRAMSize, prometheus.GaugeValue, float64(s.MemoryVRAMSize), s.Name)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.MemoryVRAMUsed, prometheus.GaugeValue, float64(s.MemoryVRAMUsed), s.Name)
+			drmMemoryVRAMUsed, prometheus.GaugeValue, float64(s.MemoryVRAMUsed), s.Name)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.MemoryVisibleVRAMSize, prometheus.GaugeValue, float64(s.MemoryVisibleVRAMSize), s.Name)
+			drmMemoryVisibleVRAMSize, prometheus.GaugeValue, float64(s.MemoryVisibleVRAMSize), s.Name)
 
 		ch <- prometheus.MustNewConstMetric(
-			c.MemoryVisibleVRAMUsed, prometheus.GaugeValue, float64(s.MemoryVisibleVRAMUsed), s.Name)
+			drmMemoryVisibleVRAMUsed, prometheus.GaugeValue, float64(s.MemoryVisibleVRAMUsed), s.Name)
 	}
 
 	return nil
