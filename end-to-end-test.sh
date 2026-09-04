@@ -76,6 +76,7 @@ enabled_collectors=$(cat << COLLECTORS
   rapl
   schedstat
   slabinfo
+  slingshot
   sockstat
   softirqs
   stat
